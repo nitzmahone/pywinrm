@@ -16,17 +16,16 @@ from requests.adapters import HTTPAdapter
 
 HAVE_KERBEROS = False
 try:
-    import kerberos
-    import requests_kerberos
+    from requests_kerberos import HTTPKerberosAuth, REQUIRED, OPTIONAL, DISABLED
     HAVE_KERBEROS = True
 except ImportError:
     pass
 
 HAVE_NTLM = False
 try:
-    from ntlm import ntlm
+    from requests_ntlm import HttpNtlmAuth
     HAVE_NTLM = True
-except ImportError:
+except ImportError as ie:
     pass
 
 from winrm.exceptions import BasicAuthDisabledError, InvalidCredentialsError, \
@@ -34,180 +33,59 @@ from winrm.exceptions import BasicAuthDisabledError, InvalidCredentialsError, \
 
 __all__ = ['Transport']
 
-if HAVE_KERBEROS:
-
-    class KerberosAuth(requests_kerberos.HTTPKerberosAuth):
-        '''
-        Custom Kerberos authentication provider that allows specifying a realm.
-        '''
-    
-        def __init__(self, mutual_authentication=requests_kerberos.REQUIRED, service='HTTP', realm=None, auth_scheme='Negotiate'):
-            super(KerberosAuth, self).__init__(mutual_authentication, service)
-            self.realm = realm
-            self.auth_scheme = auth_scheme
-            self.regex = re.compile(r'(?:.*,)*\s*%s\s*([^,]*),?' % self.auth_scheme, re.I)
-
-        @contextmanager
-        def _replace_realm(self, response):
-            original_url = response.url
-            if self.realm:
-                parts = urlsplit(original_url)
-                netloc = parts.netloc.replace(parts.hostname, self.realm)
-                response.url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-            yield
-            response.url = original_url
-
-        @contextmanager
-        def _replace_regex(self):
-            original_regex = getattr(requests_kerberos.kerberos_._negotiate_value, 'regex', None)
-            requests_kerberos.kerberos_._negotiate_value.regex = self.regex
-            yield
-            if original_regex:
-                setattr(requests_kerberos.kerberos_._negotiate_value, 'regex', original_regex)
-            else:
-                delattr(requests_kerberos.kerberos_._negotiate_value, 'regex')
-
-        def generate_request_header(self, response):
-            with self._replace_regex():
-                with self._replace_realm(response):
-                    result = super(KerberosAuth, self).generate_request_header(response)
-                    if result is not None:
-                        result = result.replace('Negotiate ', '%s ' % self.auth_scheme)
-                    return result
-
-        def handle_401(self, response, **kwargs):
-            with self._replace_regex():
-                return super(KerberosAuth, self).handle_401(response, **kwargs)
-
-        def handle_other(self, response):
-            with self._replace_regex():
-                return super(KerberosAuth, self).handle_other(response)
-
-        def authenticate_server(self, response):
-            with self._replace_regex():
-                with self._replace_realm(response):
-                    return super(KerberosAuth, self).authenticate_server(response)
-
-if HAVE_NTLM:
-
-    class NtlmAuth(requests.auth.AuthBase):
-        '''
-        HTTP NTLM Authentication Handler for Requests.
-        Supports pass-the-hash.
-        Copied from https://github.com/requests/requests-ntlm/ with changes to
-        support alternate auth schemes.
-        '''
-
-        def __init__(self, username, password, session=None, auth_scheme='NTLM'):
-            try:
-                self.domain, self.username = username.split('\\', 1)
-            except ValueError:
-                raise ValueError(
-                    r"username should be in 'domain\\username' format."
-                )
-
-            self.domain = self.domain.upper()
-            self.password = password
-            self.adapter = HTTPAdapter()
-
-            # Keep a weak reference to the Session, if one is in use.
-            # This is to avoid a circular reference.
-            self.session = weakref.ref(session) if session else None
-            self.auth_scheme = auth_scheme
-
-        def retry_using_http_NTLM_auth(self, auth_header_field, auth_header,
-                                       response, args):
-            """Attempt to authenticate using HTTP NTLM challenge/response."""
-            if auth_header in response.request.headers:
-                return response
-
-            request = response.request.copy()
-
-            content_length = int(request.headers.get('Content-Length', '0'))
-            if hasattr(request.body, 'seek'):
-                if content_length > 0:
-                    request.body.seek(-content_length, 1)
-                else:
-                    request.body.seek(0, 0)
-
-            adapter = self.adapter
-            if self.session:
-                session = self.session()
-                if session:
-                    adapter = session.get_adapter(response.request.url)
-
-            # initial auth header with username. will result in challenge
-            msg = "%s\\%s" % (self.domain, self.username) if self.domain else self.username
-            auth = '%s %s' % (self.auth_scheme, ntlm.create_NTLM_NEGOTIATE_MESSAGE(msg))
-            request.headers[auth_header] = auth
-
-            # A streaming response breaks authentication.
-            # This can be fixed by not streaming this request, which is safe
-            # because the returned response3 will still have stream=True set if
-            # specified in args. In addition, we expect this request to give us a
-            # challenge and not the real content, so the content will be short
-            # anyway.
-            args_nostream = dict(args, stream=False)
-            response2 = adapter.send(request, **args_nostream)
-
-            # needed to make NTLM auth compatible with requests-2.3.0
-            response2.content
-
-            # this is important for some web applications that store
-            # authentication-related info in cookies (it took a long time to
-            # figure out)
-            if response2.headers.get('set-cookie'):
-                request.headers['Cookie'] = response2.headers.get('set-cookie')
-
-            # get the challenge
-            auth_header_value = response2.headers[auth_header_field]
-            ntlm_header_value = list(filter(
-                lambda s: s.startswith('%s ' % self.auth_scheme), auth_header_value.split(',')
-            ))[0].strip()
-            ServerChallenge, NegotiateFlags = ntlm.parse_NTLM_CHALLENGE_MESSAGE(
-                ntlm_header_value[(len(self.auth_scheme) + 1):]
-            )
-
-            # build response
-            request = request.copy()
-            auth = '%s %s' % (self.auth_scheme, ntlm.create_NTLM_AUTHENTICATE_MESSAGE(
-                ServerChallenge, self.username, self.domain, self.password,
-                NegotiateFlags
-            ))
-            request.headers[auth_header] = auth
-
-            response3 = adapter.send(request, **args)
-
-            # Update the history.
-            response3.history.append(response)
-            response3.history.append(response2)
-
-            return response3
-
-        def response_hook(self, response, **kwargs):
-            """The actual hook handler."""
-            www_authenticate = response.headers.get('www-authenticate', '').lower()
-            www_auth_schemes = [x.strip().split()[0] for x in www_authenticate.split(',') if x.strip()]
-            if response.status_code == 401 and self.auth_scheme.lower() in www_auth_schemes:
-                return self.retry_using_http_NTLM_auth('www-authenticate',
-                                                       'Authorization', response, kwargs)
-
-            proxy_authenticate = response.headers.get('proxy-authenticate', '').lower()
-            proxy_auth_schemes = [x.strip().split()[0] for x in proxy_authenticate.split(',') if x.strip()]
-            if response.status_code == 407 and self.auth_scheme.lower() in proxy_auth_schemes:
-                return self.retry_using_http_NTLM_auth('proxy-authenticate',
-                                                       'Proxy-authorization', response,
-                                                       kwargs)
-
-            return response
-
-        def __call__(self, request):
-            # we must keep the connection because NTLM authenticates the
-            # connection, not single requests
-            request.headers["Connection"] = "Keep-Alive"
-
-            request.register_hook('response', self.response_hook)
-            return request
+# if HAVE_KERBEROS:
+#
+#     class KerberosAuth(requests_kerberos.HTTPKerberosAuth):
+#         '''
+#         Custom Kerberos authentication provider that allows specifying a realm.
+#         '''
+#
+#         def __init__(self, mutual_authentication=requests_kerberos.REQUIRED, service='HTTP', realm=None, auth_scheme='Negotiate'):
+#             super(KerberosAuth, self).__init__(mutual_authentication, service)
+#             self.realm = realm
+#             self.auth_scheme = auth_scheme
+#             self.regex = re.compile(r'(?:.*,)*\s*%s\s*([^,]*),?' % self.auth_scheme, re.I)
+#
+#         @contextmanager
+#         def _replace_realm(self, response):
+#             original_url = response.url
+#             if self.realm:
+#                 parts = urlsplit(original_url)
+#                 netloc = parts.netloc.replace(parts.hostname, self.realm)
+#                 response.url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+#             yield
+#             response.url = original_url
+#
+#         @contextmanager
+#         def _replace_regex(self):
+#             original_regex = getattr(requests_kerberos.kerberos_._negotiate_value, 'regex', None)
+#             requests_kerberos.kerberos_._negotiate_value.regex = self.regex
+#             yield
+#             if original_regex:
+#                 setattr(requests_kerberos.kerberos_._negotiate_value, 'regex', original_regex)
+#             else:
+#                 delattr(requests_kerberos.kerberos_._negotiate_value, 'regex')
+#
+#         def generate_request_header(self, response):
+#             with self._replace_regex():
+#                 with self._replace_realm(response):
+#                     result = super(KerberosAuth, self).generate_request_header(response)
+#                     if result is not None:
+#                         result = result.replace('Negotiate ', '%s ' % self.auth_scheme)
+#                     return result
+#
+#         def handle_401(self, response, **kwargs):
+#             with self._replace_regex():
+#                 return super(KerberosAuth, self).handle_401(response, **kwargs)
+#
+#         def handle_other(self, response):
+#             with self._replace_regex():
+#                 return super(KerberosAuth, self).handle_other(response)
+#
+#         def authenticate_server(self, response):
+#             with self._replace_regex():
+#                 with self._replace_realm(response):
+#                     return super(KerberosAuth, self).authenticate_server(response)
 
 
 class MultiAuth(requests.auth.AuthBase):
@@ -247,7 +125,7 @@ class MultiAuth(requests.auth.AuthBase):
                 new_response = adapter.send(prepared_request, **kwargs)
                 new_response.history.append(response)
                 new_response.request = prepared_request
-        
+
                 if new_response.status_code != 401:
                     #print auth_instance, 'successful for', auth_scheme
                     self.current_auth = auth_instance
@@ -273,7 +151,8 @@ class Transport(object):
     def __init__(
             self, endpoint, username=None, password=None, realm=None,
             service=None, keytab=None, ca_trust_path=None, cert_pem=None,
-            cert_key_pem=None, timeout=None):
+            cert_key_pem=None, timeout=None, server_cert_validation='validate',
+            auth_method='auto'):
         self.endpoint = endpoint
         self.username = username
         self.password = password
@@ -284,6 +163,7 @@ class Transport(object):
         self.cert_pem = cert_pem
         self.cert_key_pem = cert_key_pem
         self.timeout = timeout
+        self.server_cert_validation = server_cert_validation
         self.default_headers = {
             'Content-Type': 'application/soap+xml;charset=UTF-8',
             'User-Agent': 'Python WinRM client',
@@ -292,27 +172,49 @@ class Transport(object):
 
     def build_session(self):
         session = requests.Session()
-        
+
+        # configure proxies
+        session.trust_env = True
+        settings = session.merge_environment_settings(url=self.endpoint, proxies={}, stream=None, verify=self.server_cert_validation=='validate', cert=None)
+
+        session.proxies = settings['proxies']
+
         session.auth = MultiAuth(session)
-        if HAVE_KERBEROS:
-            for auth_scheme in ('Negotiate', 'Kerberos'):
-                kerberos_auth = KerberosAuth(mutual_authentication=requests_kerberos.OPTIONAL, realm=self.realm, auth_scheme=auth_scheme)
-                session.auth.add_auth(auth_scheme, kerberos_auth)
 
-        if HAVE_NTLM and self.username and '\\' in self.username and self.password:
-            for auth_scheme in ('Negotiate', 'NTLM'):
-                ntlm_auth = NtlmAuth(self.username, self.password, session, auth_scheme)
-                session.auth.add_auth(auth_scheme, ntlm_auth)
+        if auth_method in ['auto', 'kerberos']:
+            if HAVE_KERBEROS:
+                # FUTURE: add support for explicit principal once requests_kerberos is updated for it
+                # FUTURE: add support for realm override
+                kerberos_auth = session.auth = HTTPKerberosAuth(mutual_authentication=REQUIRED, delegate=True, force_preemptive=True)
+        #        session.auth.add_auth(auth_scheme, kerberos_auth)
 
-        if self.username and self.password:
-            basic_auth = requests.auth.HTTPBasicAuth(self.username, self.password)
-            session.auth.add_auth('Basic', basic_auth)
+            elif not HAVE_KERBEROS and auth_method == 'kerberos':
+                raise
 
-        if self.cert_pem:
-            if self.cert_key_pem:
-                session.cert = (self.cert_pem, self.cert_key_pem)
-            else:
-                session.cert = self.cert_pem
+
+        # TODO: due to what appears to be a bug in requests_kerberos, we have to make mutual auth OPTIONAL or DISABLED.
+        # requests_kerberos needs to be able to
+
+
+        # if HAVE_KERBEROS:
+        #     for auth_scheme in ('Negotiate', 'Kerberos'):
+        #         kerberos_auth = KerberosAuth(mutual_authentication=requests_kerberos.OPTIONAL, realm=self.realm, auth_scheme=auth_scheme)
+        #         session.auth.add_auth(auth_scheme, kerberos_auth)
+        #
+        # if HAVE_NTLM and self.username and '\\' in self.username and self.password:
+        #     for auth_scheme in ('Negotiate', 'NTLM'):
+        #         ntlm_auth = NtlmAuth(self.username, self.password, session, auth_scheme)
+        #         session.auth.add_auth(auth_scheme, ntlm_auth)
+        #
+        # if self.username and self.password:
+        #     basic_auth = requests.auth.HTTPBasicAuth(self.username, self.password)
+        #     session.auth.add_auth('Basic', basic_auth)
+        #
+        # if self.cert_pem:
+        #     if self.cert_key_pem:
+        #         session.cert = (self.cert_pem, self.cert_key_pem)
+        #     else:
+        #         session.cert = self.cert_pem
 
         session.headers.update(self.default_headers)
 
@@ -323,6 +225,10 @@ class Transport(object):
 
         if not self.session:
             self.session = self.build_session()
+
+        if message is unicode:
+            message = message.encode('utf-8')
+
         request = requests.Request('POST', self.endpoint, data=message)
         prepared_request = self.session.prepare_request(request)
         try:

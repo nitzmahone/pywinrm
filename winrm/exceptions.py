@@ -5,6 +5,9 @@ class WinRMError(Exception):
     """"Generic WinRM error"""
     code = 500
 
+class WinRMTransportError(Exception):
+    """Only here for backcompat"""
+    code = 500
 
 class AuthenticationError(WinRMError):
     """Authorization Error"""
