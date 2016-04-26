@@ -6,7 +6,7 @@ class WinRMError(Exception):
     code = 500
 
 class WinRMTransportError(Exception):
-    """Only here for backcompat"""
+    """Unused- only here for backcompat on things that import it"""
     code = 500
 
 class AuthenticationError(WinRMError):

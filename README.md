@@ -20,11 +20,17 @@ For more information on WinRM, please visit
 $ pip install http://github.com/diyan/pywinrm/archive/master.zip
 ```
 
+### To use NTLM authentication you need these optional dependencies
+
+```bash
+$ pip install pywinrm[ntlm]
+```
+
 ### To use Kerberos authentication you need these optional dependencies
 
 ```bash
 $ sudo apt-get install python-dev libkrb5-dev
-$ pip install kerberos
+$ pip install pywinrm[kerberos]
 ```
 
 ## Example Usage

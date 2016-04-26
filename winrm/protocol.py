@@ -14,7 +14,7 @@ class Protocol(object):
     are a few helper classes, but pretty much everything comes through here
     first.
     """
-    DEFAULT_TIMEOUT = 60
+    DEFAULT_TIMEOUT = 10
     DEFAULT_MAX_ENV_SIZE = 153600
     DEFAULT_LOCALE = 'en-US'
 
@@ -23,8 +23,7 @@ class Protocol(object):
             password=None, realm=None, service=None, keytab=None,
             ca_trust_path=None, cert_pem=None, cert_key_pem=None,
             server_cert_validation='validate',
-            kerberos_mutual_authentication='optional',
-            allow_kerberos_delegation=False):
+            kerberos_delegation=None):
         """
         @param string endpoint: the WinRM webservice endpoint
         @param string transport: transport type, one of 'plaintext' (default), 'kerberos', 'ssl'  # NOQA
@@ -36,37 +35,29 @@ class Protocol(object):
         @param string ca_trust_path: Certification Authority trust path
         @param string cert_pem: client authentication certificate file path in PEM format  # NOQA
         @param string cert_key_pem: client authentication certificate key file path in PEM format  # NOQA
+        @param string server_cert_validation: whether server certificate should be validated on Python versions that suppport it; one of 'validate' (default), 'ignore' #NOQA
+        @param string kerberos_delegation: if True, TGT is sent to target server to allow multiple hops  # NOQA
         """
         self.timeout = Protocol.DEFAULT_TIMEOUT
         self.max_env_sz = Protocol.DEFAULT_MAX_ENV_SIZE
         self.locale = Protocol.DEFAULT_LOCALE
 
-
-
-
-
         self.transport = Transport(
             endpoint=endpoint, username=username, password=password,
             realm=realm, service=service, keytab=keytab,
             ca_trust_path=ca_trust_path, cert_pem=cert_pem,
-            cert_key_pem=cert_key_pem, timeout=self.timeout)
-        """
-        if transport == 'plaintext':
-            self.transport = HttpPlaintext(endpoint, username, password)
-        elif transport == 'kerberos':
-            self.transport = HttpKerberos(endpoint, realm, service, keytab)
-        elif transport == 'ssl':
-            self.transport = HttpSSL(
-                endpoint, username, password, cert_pem=cert_pem,
-                cert_key_pem=cert_key_pem)
-        else:
-            raise NotImplementedError()
-        """
+            cert_key_pem=cert_key_pem, timeout=self.timeout,
+            server_cert_validation=server_cert_validation,
+            kerberos_delegation=kerberos_delegation,
+            auth_method=transport)
+
         self.username = username
         self.password = password
         self.service = service
         self.keytab = keytab
         self.ca_trust_path = ca_trust_path
+        self.server_cert_validation = server_cert_validation
+        self.kerberos_delegation = kerberos_delegation
 
     def open_shell(self, i_stream='stdin', o_stream='stdout stderr',
                    working_directory=None, env_vars=None, noprofile=False,

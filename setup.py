@@ -1,7 +1,7 @@
 from __future__ import unicode_literals
 from distutils.core import setup
 
-__version__ = '0.0.3'
+__version__ = '0.2.0'
 
 # PyPi supports only reStructuredText, so pandoc should be installed
 # before uploading package
@@ -25,6 +25,10 @@ setup(
     packages=('winrm', 'tests'),
     package_data={'tests': ['*.ps1']},
     install_requires=['xmltodict', 'requests'],
+    extras_require = dict(
+        ntlm=['requests_ntlm>0.2.0'],
+        kerberos=['requests_kerberos>0.8.0'],
+    ),
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',

@@ -5,6 +5,8 @@ import xml.etree.ElementTree as ET
 
 from winrm.protocol import Protocol
 
+# feature support attributes for multi-version clients
+FEATURE_SUPPORTED_AUTHTYPES=['basic', 'certificate', 'ntlm', 'kerberos', 'plaintext', 'ssl']
 
 class Response(object):
     """Response from a remote command execution"""
