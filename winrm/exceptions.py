@@ -9,6 +9,14 @@ class WinRMTransportError(Exception):
     """Unused- only here for backcompat on things that import it"""
     code = 500
 
+class WinRMOperationTimeoutError(Exception):
+    """
+    Raised when a WinRM-level operation timeout (not a connection-level timeout) has occurred. This is
+    considered a normal error that should be retried transparently by the client when waiting for output from
+    a long-running process.
+    """
+    code = 500
+
 class AuthenticationError(WinRMError):
     """Authorization Error"""
     code = 401

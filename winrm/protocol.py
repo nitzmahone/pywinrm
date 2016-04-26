@@ -7,14 +7,15 @@ import xml.etree.ElementTree as ET
 import xmltodict
 
 from winrm.transport import Transport
-
+from winrm.exceptions import WinRMError, WinRMOperationTimeoutError
 
 class Protocol(object):
     """This is the main class that does the SOAP request/response logic. There
     are a few helper classes, but pretty much everything comes through here
     first.
     """
-    DEFAULT_TIMEOUT = 10
+    DEFAULT_READ_TIMEOUT_SEC = 30
+    DEFAULT_OPERATION_TIMEOUT_SEC = 20
     DEFAULT_MAX_ENV_SIZE = 153600
     DEFAULT_LOCALE = 'en-US'
 
@@ -23,7 +24,10 @@ class Protocol(object):
             password=None, realm=None, service=None, keytab=None,
             ca_trust_path=None, cert_pem=None, cert_key_pem=None,
             server_cert_validation='validate',
-            kerberos_delegation=None):
+            kerberos_delegation=None,
+            read_timeout_sec=DEFAULT_READ_TIMEOUT_SEC,
+            operation_timeout_sec=DEFAULT_OPERATION_TIMEOUT_SEC,
+        ):
         """
         @param string endpoint: the WinRM webservice endpoint
         @param string transport: transport type, one of 'plaintext' (default), 'kerberos', 'ssl'  # NOQA
@@ -37,8 +41,15 @@ class Protocol(object):
         @param string cert_key_pem: client authentication certificate key file path in PEM format  # NOQA
         @param string server_cert_validation: whether server certificate should be validated on Python versions that suppport it; one of 'validate' (default), 'ignore' #NOQA
         @param string kerberos_delegation: if True, TGT is sent to target server to allow multiple hops  # NOQA
+        @param int read_timeout_sec: maximum seconds to wait before an HTTP connect/read times out (default 30). This value should be slightly higher than operation_timeout_sec, as the server will
+        @param int operation_timeout_sec: maximum allowed time in seconds for any single wsman HTTP operation (default 20). Note that operation timeouts while receiving output (the only wsman operation that should take any significant time, and where these timeouts are expected) will be silently retried indefinitely.
         """
-        self.timeout = Protocol.DEFAULT_TIMEOUT
+
+        if operation_timeout_sec >= read_timeout_sec or operation_timeout_sec < 1:
+            raise WinRMError("read_timeout_sec must exceed operation_timeout_sec, and both must be non-zero")
+
+        self.read_timeout_sec = read_timeout_sec
+        self.operation_timeout_sec = operation_timeout_sec
         self.max_env_sz = Protocol.DEFAULT_MAX_ENV_SIZE
         self.locale = Protocol.DEFAULT_LOCALE
 
@@ -46,7 +57,7 @@ class Protocol(object):
             endpoint=endpoint, username=username, password=password,
             realm=realm, service=service, keytab=keytab,
             ca_trust_path=ca_trust_path, cert_pem=cert_pem,
-            cert_key_pem=cert_key_pem, timeout=self.timeout,
+            cert_key_pem=cert_key_pem, read_timeout_sec=self.read_timeout_sec,
             server_cert_validation=server_cert_validation,
             kerberos_delegation=kerberos_delegation,
             auth_method=transport)
@@ -164,7 +175,7 @@ class Protocol(object):
                 # TODO: research this a bit http://msdn.microsoft.com/en-us/library/cc251561(v=PROT.13).aspx  # NOQA
                 # 'cfg:MaxTimeoutms': 600
                 # Operation timeout in ISO8601 format, see http://msdn.microsoft.com/en-us/library/ee916629(v=PROT.13).aspx  # NOQA
-                'w:OperationTimeout': 'PT{0}S'.format(int(self.timeout)),
+                'w:OperationTimeout': 'PT{0}S'.format(int(self.operation_timeout_sec)),
                 'w:ResourceURI': {
                     '@mustUnderstand': 'true',
                     '#text': resource_uri
@@ -310,10 +321,14 @@ class Protocol(object):
         stdout_buffer, stderr_buffer = [], []
         command_done = False
         while not command_done:
-            stdout, stderr, return_code, command_done = \
-                self._raw_get_command_output(shell_id, command_id)
-            stdout_buffer.append(stdout)
-            stderr_buffer.append(stderr)
+            try:
+                stdout, stderr, return_code, command_done = \
+                    self._raw_get_command_output(shell_id, command_id)
+                stdout_buffer.append(stdout)
+                stderr_buffer.append(stderr)
+            except WinRMOperationTimeoutError as e:
+                # this is an expected error when waiting for a long-running process, just silently retry
+                pass
         return ''.join(stdout_buffer), ''.join(stderr_buffer), return_code
 
     def _raw_get_command_output(self, shell_id, command_id):

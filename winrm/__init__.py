@@ -7,6 +7,8 @@ from winrm.protocol import Protocol
 
 # feature support attributes for multi-version clients
 FEATURE_SUPPORTED_AUTHTYPES=['basic', 'certificate', 'ntlm', 'kerberos', 'plaintext', 'ssl']
+FEATURE_READ_TIMEOUT=True
+FEATURE_OPERATION_TIMEOUT=True
 
 class Response(object):
     """Response from a remote command execution"""
