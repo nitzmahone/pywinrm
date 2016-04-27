@@ -95,7 +95,7 @@ class Transport(object):
                 raise WinRMError("requested auth method is kerberos, but requests_kerberos is not installed")
             # TODO: do argspec sniffing on extensions to ensure we're not setting bogus kwargs on older versions
             session.auth = HTTPKerberosAuth(mutual_authentication=REQUIRED, delegate=self.kerberos_delegation,
-                                            force_preemptive=True, principal=self.username, realm_override=self.realm)
+                                            force_preemptive=True, principal=self.username, hostname_override=self.realm)
         elif self.auth_method in ['certificate','ssl']:
             if self.auth_method == 'ssl' and not self.cert_pem and not self.cert_key_pem:
                 # 'ssl' was overloaded for HTTPS with optional certificate auth,
@@ -116,11 +116,17 @@ class Transport(object):
         elif self.auth_method == 'ntlm':
             if not HAVE_NTLM:
                 raise WinRMError("requested auth method is ntlm, but requests_ntlm is not installed")
-            if self.password is None:
+            if not self.username:
+                raise InvalidCredentialsError("auth method ntlm requires a username")
+            if not self.password:
                 raise InvalidCredentialsError("auth method ntlm requires a password")
             session.auth = HttpNtlmAuth(username=self.username, password=self.password)
         # TODO: ssl is not exactly right here- should really be client_cert
         elif self.auth_method in ['basic','plaintext']:
+            if not self.username:
+                raise InvalidCredentialsError("auth method basic requires a username")
+            if not self.password:
+                raise InvalidCredentialsError("auth method basic requires a password")
             session.auth = requests.auth.HTTPBasicAuth(username=self.username, password=self.password)
 
         else:

@@ -5,3 +5,4 @@ pytest-pep8
 mock
 httpretty
 requests
+requests_ntlm>0.2.0

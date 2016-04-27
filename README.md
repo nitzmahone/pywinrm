@@ -11,19 +11,13 @@ For more information on WinRM, please visit
 
 ## Requirements
 * Linux, Mac OS X or Windows
-* CPython 2.6, 2.7, 3.2, 3.3 or PyPy 1.9
+* CPython 2.6-2.7, 3.2-3.5 or PyPy 1.9
 * [python-kerberos](http://pypi.python.org/pypi/kerberos) is optional
 
 ## Installation
 ### To install pywinrm, simply
 ```bash
-$ pip install http://github.com/diyan/pywinrm/archive/master.zip
-```
-
-### To use NTLM authentication you need these optional dependencies
-
-```bash
-$ pip install pywinrm[ntlm]
+$ pip install pywinrm
 ```
 
 ### To use Kerberos authentication you need these optional dependencies
@@ -55,7 +49,7 @@ Windows IP Configuration
 
 ```
 
-NOTE: pywirnm will try and guess the correct endpoint url from the following formats:
+NOTE: pywinrm will try and guess the correct endpoint url from the following formats:
 
  - windows-host -> http://windows-host:5985/wsman
  - windows-host:1111 -> http://windows-host:1111/wsman
@@ -106,64 +100,31 @@ p.cleanup_command(shell_id, command_id)
 p.close_shell(shell_id)
 ```
 
-## Client-side and server-side configuration
+### Enable WinRM on remote host
 
-### Server-side. Configure WinRM service on Windows host
-
-NOTE You may want to use [ievms](https://xdissent.github.com/ievms) to get free Windows VM up and running:
-
-```bash
-$ curl -s https://raw.githubusercontent.com/xdissent/ievms/master/ievms.sh | env IEVMS_VERSIONS="9" bash
-```
-Enable WinRM service on remote host/VM:
+- Enable basic WinRM authentication (Good only for troubleshooting. For domain users it is necessary to use NTLM or Kerberos authentication.)
+- Allow unencrypted message passing over WinRM (not secure for hosts in a domain but this feature was not yet implemented.)
 
 ```
-C:\> winrm quickconfig
+winrm set winrm/config/client/auth @{Basic="true"}
+winrm set winrm/config/service/auth @{Basic="true"}
+winrm set winrm/config/service @{AllowUnencrypted="true"}
 ```
-
-Allow basic WinRM authentication for service:
-
-```
-C:\> winrm set winrm/config/service/auth @{Basic="true"}
-C:\> winrm set winrm/config/service @{AllowUnencrypted="true"}
-```
-
-NOTES:
-
-- Basic auth will work only if unencrypted data transfer will be allowed on the server side
-- For hosts in domain it's safer to use Kerberos authentication, not Basic
-- Unencrypted data transfer vulnerable to man-in-the-middle attack and could be used only in secure environments like VPN tunnel
-- Message encryption is not yet implemented in pywinrm
-
-### Client-side. Configure WinRM client on Windows host
-
-It make sense to configure native WinRM client on same Windows host/VM and make sure it works.
-
-Allow basic WinRM authentication for client:
-
-```
-C:\> winrm set winrm/config/client/auth @{Basic="true"}
-C:\> winrm set winrm/config/client @{AllowUnencrypted="true"}
-```
-Make sure that WinRM works on localhost with basic authentication and unencrypted messages:
-
-```
-C:\> winrs -r:localhost -u:IEUser -p:Passw0rd! -unencrypted hostname
-IE9Win7
-```
-
-
-### More details on how to configure WinRM
-
-- https://support.microsoft.com/en-us/kb/555966
 
 ### Contributors (alphabetically)
 
 - Alessandro Pilotti
+- Chris Church
 - David Cournapeau
 - Gema Gomez
+- Jijo Varghese
+- Juan J. Martinez
+- Lukas Bednar
+- Manuel Sabban
 - Matt Clark
+- Nir Cohen
+- Matt Davis
 - Patrick Dunnigan
-
+- Reina Abolofia
 
 Want to help - send a pull request. I will accept good pull requests for sure.

@@ -26,7 +26,6 @@ setup(
     package_data={'tests': ['*.ps1']},
     install_requires=['xmltodict', 'requests'],
     extras_require = dict(
-        ntlm=['requests_ntlm>0.2.0'],
         kerberos=['requests_kerberos>0.8.0'],
     ),
     classifiers=[
