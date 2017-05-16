@@ -1,5 +1,13 @@
 import requests
 import struct
+import sys
+
+is_py2 = sys.version[0] == '2'
+
+if is_py2:
+    from urlparse import urlsplit, urlunsplit
+else:
+    from urllib.parse import urlsplit, urlunsplit
 
 from winrm.exceptions import WinRMError
 
@@ -23,15 +31,37 @@ class Encryption(object):
 
         :param session: The handle of the session to get GSS-API wrap and unwrap methods
         :param protocol: The auth protocol used, will determine the wrapping and unwrapping method plus
-                         the protocol string to use. Currently only NTLM is supported
+                         the protocol string to use. 
         """
+
+        self.session = session
+        self.protocol = protocol
+
         if protocol == 'ntlm': # Details under Negotiate [2.2.9.1.1] in MS-WSMV
-            self.wrap = session.auth.session_security.wrap
-            self.unwrap = session.auth.session_security.unwrap
             self.protocol_string = b"application/HTTP-SPNEGO-session-encrypted"
-        # TODO: Add support for Kerberos and CredSSP encryption
+        elif protocol == 'kerberos':
+            self.protocol_string = b"application/HTTP-Kerberos-session-encrypted"
+        # TODO: Add support for CredSSP encryption
         else:
             raise WinRMError("Encryption for protocol '%s' not yet supported in pywinrm" % protocol)
+
+    def wrap(self, message, endpoint):
+        # TODO: NTLM context should technically be host-based too?
+        if self.protocol == 'ntlm':
+            return self.session.auth.session_security.wrap(message)
+        elif self.protocol == 'kerberos':
+            return self.session.auth.wrap(urlsplit(endpoint).hostname, message)
+        else:
+            raise WinRMError("Encryption for protocol '%s' not yet supported in pywinrm" % self.protocol)
+
+    def unwrap(self, message, signature, endpoint):
+        # TODO: NTLM context should technically be host-based too?
+        if self.protocol == 'ntlm':
+            return self.session.auth.session_security.unwrap(message, signature)
+        elif self.protocol == 'kerberos':
+            return self.session.auth.unwrap(urlsplit(endpoint).hostname, message, signature)
+        else:
+            raise WinRMError("Encryption for protocol '%s' not yet supported in pywinrm" % self.protocol)
 
     def prepare_encrypted_request(self, session, endpoint, message):
         """
@@ -43,7 +73,7 @@ class Encryption(object):
         :param message: The unencrypted message to send to the server
         :return: A prepared request that has an encrypted message
         """
-        encrypted_message = self._encrypt_message(message)
+        encrypted_message = self._encrypt_message(message, endpoint)
         request = requests.Request('POST', endpoint, data=encrypted_message)
         prepared_request = session.prepare_request(request)
         prepared_request.headers['Content-Length'] = str(len(prepared_request.body))
@@ -67,8 +97,8 @@ class Encryption(object):
 
         return msg
 
-    def _encrypt_message(self, message):
-        sealed_message, signature = self.wrap(message)
+    def _encrypt_message(self, message, endpoint):
+        sealed_message, signature = self.wrap(message, endpoint)
         message_length = str(len(message)).encode()
         signature_length = struct.pack("<i", len(signature))
 
@@ -98,7 +128,7 @@ class Encryption(object):
         signature = encrypted_data[4:signature_length + 4]
         encrypted_message = encrypted_data[signature_length + 4:]
 
-        message = self.unwrap(encrypted_message, signature)
+        message = self.unwrap(encrypted_message, signature, response.request.url)
         actual_length = len(message)
         if actual_length != expected_length:
             raise WinRMError('Encrypted length from server does not match the expected size, message has been tampered with')

@@ -155,6 +155,8 @@ class Transport(object):
                                             force_preemptive=True, principal=self.username,
                                             hostname_override=self.kerberos_hostname_override,
                                             sanitize_mutual_error_response=False)
+
+            encryption_available = hasattr(session.auth, 'wrap')
         elif self.auth_method in ['certificate','ssl']:
             if self.auth_method == 'ssl' and not self.cert_pem and not self.cert_key_pem:
                 # 'ssl' was overloaded for HTTPS with optional certificate auth,
