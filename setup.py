@@ -1,6 +1,6 @@
 from setuptools import setup
 
-__version__ = '0.2.2'
+__version__ = '0.3.0a1'
 project_name = 'pywinrm'
 
 # PyPi supports only reStructuredText, so pandoc should be installed
@@ -24,7 +24,11 @@ setup(
     packages=('winrm', 'winrm.tests'),
     package_data={'winrm.tests': ['*.ps1']},
     install_requires=['xmltodict', 'requests>=2.9.1', 'requests_ntlm>=0.3.0', 'six'],
-    extras_require = dict(kerberos=['requests-kerberos>=0.10.0'], credssp=['requests-credssp>=0.0.1']),
+    extras_require = dict(
+        kerberos=['requests-kerberos>=0.10.0'],
+        credssp=['requests-credssp>=0.0.1'],
+        kerb_kme_alpha=['requests-kerberos==0.12.0a1','kerberos==1.3.0a1']
+    ),
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',
